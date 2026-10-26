@@ -378,9 +378,14 @@ async function main() {
           overflow: fit.overflow,
           fill: fit.fill,
         });
-        if (done % 5 === 0 || done === items.length) {
-          console.log(`  rendered ${done}/${items.length} (${((Date.now() - t0) / 1000).toFixed(1)}s)`);
-        }
+        const pct = ((done / items.length) * 100).toFixed(1);
+        const filled = Math.round((done / items.length) * 24);
+        const elapsed = ((Date.now() - t0) / 1000).toFixed(1);
+        process.stdout.write(
+          `\rrender ${'#'.repeat(filled).padEnd(24, '.')} ${done}/${items.length} ` +
+            `(${pct}%) ${elapsed}s  ${id}`.padEnd(78),
+        );
+        if (done === items.length) process.stdout.write('\n');
       } catch (err) {
         console.error(`  ! render failed ${id}: ${err.message}`);
       } finally {

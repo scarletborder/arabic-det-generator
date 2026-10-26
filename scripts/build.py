@@ -1,5 +1,7 @@
 """端到端流水线。"""
 import argparse, json, random, shutil, subprocess, sys, time
+
+from tqdm import tqdm
 from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
@@ -20,7 +22,9 @@ def stage_pages(args, pool, faces, langs):
     profiles = degrade.assign_profiles(args.count, rng)
     pages = []
     pages_dir.mkdir(parents=True, exist_ok=True)
-    for idx, (lang, prof) in enumerate(zip(plan, profiles)):
+    bar = tqdm(zip(plan, profiles), total=len(plan), desc="版式", unit="page", dynamic_ncols=True)
+    for idx, (lang, prof) in enumerate(bar):
+        bar.set_postfix_str(f"{lang}/{prof}")
         prng = random.Random(rng.getrandbits(32))
         pid = f"{lang}-{args.seed:04d}-{idx:06d}"
         spec = pagebuild.build_spec(prng, pool, faces, lang, pid,
@@ -63,7 +67,7 @@ def stage_paddle(args, pages):
     _reset(dst / "images")
     lines = []
     skipped = 0
-    for f in sorted(src.glob("*.json")):
+    for f in tqdm(sorted(src.glob("*.json")), desc="Paddle 导出", unit="img", dynamic_ncols=True):
         d = json.loads(f.read_text(encoding="utf-8"))
         pid = d["page_id"]
         img = o / "final" / "images" / f"{pid}.jpg"
@@ -104,7 +108,9 @@ def stage_degrade(args, pages):
     stats = {"pages": 0, "lines": 0, "words": 0, "dropped_pages": 0}
     cov_l = cov_w = 0.0
     pc = {}
-    for page in pages:
+    bar = tqdm(pages, desc="退化", unit="page", dynamic_ncols=True)
+    for page in bar:
+        bar.set_postfix_str(page["profile"])
         pid = page["page_id"]
         cimg = clean / "images" / f"{pid}.png"
         lpath = clean / "labels" / f"{pid}.json"

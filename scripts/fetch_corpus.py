@@ -25,6 +25,8 @@ import urllib.parse
 import urllib.request
 from pathlib import Path
 
+from tqdm import tqdm
+
 ROOT = Path(__file__).resolve().parent.parent
 API = "https://datasets-server.huggingface.co/rows"
 
@@ -160,12 +162,14 @@ def build_lang(lang: str, articles: int, texts_dir: Path, opener, seed_tag: str)
     batch = 50
     fetched = 0
     offset = 0
+    wiki_bar = tqdm(total=articles, desc="维基百科", unit="doc", dynamic_ncols=True, leave=False)
     while fetched < articles and offset < articles * 4:
         rows = fetch_rows("wikimedia/wikipedia", f"20231101.{lang}", offset, batch, opener)
         if not rows:
             break
         offset += batch
         fetched += len(rows)
+        wiki_bar.update(len(rows))
         for row in rows:
             title = clean_line(str(row.get("title", "")))
             if 1 <= len(title.split()) <= 8:
@@ -180,15 +184,19 @@ def build_lang(lang: str, articles: int, texts_dir: Path, opener, seed_tag: str)
     fetched = 0
     offset = 0
     corpus_target = max(60, articles // 3)
+    c4_bar = tqdm(total=corpus_target, desc="网页语料", unit="doc", dynamic_ncols=True, leave=False)
     while fetched < corpus_target and offset < corpus_target * 4:
         rows = fetch_rows("allenai/c4", C4_INVALID[lang], offset, 100, opener)
         if not rows:
             break
-        offset += batch
+        offset += 100
         fetched += len(rows)
+        c4_bar.update(len(rows))
         for row in rows:
             for p in split_article(str(row.get("text", "")))[0]:
                 corpus_paras.append(p)
+    wiki_bar.close()
+    c4_bar.close()
 
     # ---- 组装各“位置”池
     body_lines = [p for p in bodies if 20 <= len(p.split()) <= 320]
