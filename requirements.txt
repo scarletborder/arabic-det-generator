@@ -1,0 +1,3 @@
+# Python 侧依赖（渲染阶段用 Node/Playwright，见 package.json）
+numpy>=1.26
+opencv-python>=4.9
