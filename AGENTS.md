@@ -116,6 +116,7 @@ AGENTS.md                   # 本约束文件
 
 - 生成结果统一写到 `outputs/`（`outputs/images/`、`outputs/labels/`、`outputs/debug/`），**不要**污染 `src/`、`scripts/`、`texts/`、`fonts/`。
 - 产物目录需可被整体删除重生成；每次运行附带 `outputs/run-<seed>.json`（种子、字体、比例、退化参数）。
+- 输出分辨率由 `--res WxH` 控制（默认 `640x800`）：版式按 794px 宽设计，`--res` 只做等比缩放（字号/边距同步），因此版式比例不变；`--dpr` 仅用于超采样，默认 1.0。
 - `--paddle` 时训练数据改为 PaddleOCR det 格式：`outputs/images/*.jpg` + `outputs/train_list.txt`（每行 `相对路径\t[{"transcription","points"}]`，行级多边形），并**不保留** `outputs/final/`；此时 `data_dir` 指 `outputs/`，`label_file_list` 指 `outputs/train_list.txt`。
 
 ---
@@ -164,5 +165,5 @@ AGENTS.md                   # 本约束文件
 
 产物：`outputs/pages/<id>/`、`outputs/clean/{images,labels}/`、`outputs/final/{images,labels}/`、`outputs/debug/`、`outputs/run-<seed>.json`。
 
-运行（先开代理）：`python scripts/fetch_corpus.py` → `python scripts/build.py --count 30 --seed 7 --debug`。
+运行（先开代理）：`python scripts/fetch_corpus.py` → `python scripts/build.py --count 30 --seed 7 --debug --res 640x800`。
 导出 PaddleOCR det 训练集：在末尾加 `--paddle`（`stage_paddle()` 负责转换并清理 `final/`）。

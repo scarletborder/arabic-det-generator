@@ -28,7 +28,7 @@ def stage_pages(args, pool, faces, langs):
         prng = random.Random(rng.getrandbits(32))
         pid = f"{lang}-{args.seed:04d}-{idx:06d}"
         spec = pagebuild.build_spec(prng, pool, faces, lang, pid,
-            width=args.width, height=args.height,
+            width=args.width, height=args.height, scale=args.scale,
             illus_prob=args.illust_prob,
             page_no=prng.randint(1, 480))
         d = pages_dir / pid
@@ -60,6 +60,18 @@ def stage_render(args):
     subprocess.run(cmd, check=True, cwd=str(ROOT))
 
 
+def _collect_dets(d: dict) -> list:
+    """把一页的 line 标注整理成 PaddleOCR det 的 detection 列表（与 --paddle 同构）。"""
+    dets = []
+    for ln in d["lines"]:
+        text = (ln.get("text") or "").strip()
+        pts = [[round(float(px), 1), round(float(py), 1)] for px, py in ln["polygon"]]
+        if len(pts) < 4:
+            continue
+        dets.append({"transcription": text if text else "###", "points": pts})
+    return dets
+
+
 def stage_paddle(args, pages):
     o = Path(args.out)
     src = o / "final" / "labels"
@@ -75,21 +87,50 @@ def stage_paddle(args, pages):
             skipped += 1
             continue
         shutil.copy2(img, dst / "images" / img.name)
-        dets = []
-        for ln in d["lines"]:
-            text = (ln.get("text") or "").strip()
-            pts = [[round(float(px), 1), round(float(py), 1)] for px, py in ln["polygon"]]
-            if len(pts) < 4:
-                continue
-            dets.append({"transcription": text if text else "###", "points": pts})
+        dets = _collect_dets(d)
         if not dets:
             skipped += 1
             continue
         lines.append(f"images/{img.name}\t{json.dumps(dets, ensure_ascii=False)}")
 
     (dst / "train_list.txt").write_text("\n".join(lines) + "\n", encoding="utf-8", newline="\n")
-    shutil.rmtree(o / "final", ignore_errors=True)  # 只保留 Paddle 格式，不保留原生 labels
+    # --gtsha256 仍依赖 final/ 里的原始产物，故此时保留 final 目录
+    if not args.gtsha256:
+        shutil.rmtree(o / "final", ignore_errors=True)  # 只保留 Paddle 格式，不保留原生 labels
     print(f"[paddle] {len(lines)} images -> {dst} (skipped {skipped})")
+    return dst
+
+
+def stage_gtsha256(args, pages):
+    """在 final/ 下额外生成一个 sha256 内容寻址的标注清单（格式同 --paddle）。
+
+    每行：``sha256:<image_sha256>\t[{"transcription", "points"}]``，
+    文件写在 ``final/train_list_sha256.txt``。
+    """
+    import hashlib
+
+    o = Path(args.out)
+    src = o / "final" / "labels"
+    img_dir = o / "final" / "images"
+    dst = o / "final"
+    lines = []
+    skipped = 0
+    for f in tqdm(sorted(src.glob("*.json")), desc="gtsha256 导出", unit="img", dynamic_ncols=True):
+        d = json.loads(f.read_text(encoding="utf-8"))
+        pid = d["page_id"]
+        img = img_dir / f"{pid}.jpg"
+        if not img.exists():
+            skipped += 1
+            continue
+        h = hashlib.sha256(img.read_bytes()).hexdigest()
+        dets = _collect_dets(d)
+        if not dets:
+            skipped += 1
+            continue
+        lines.append(f"sha256:{h}\t{json.dumps(dets, ensure_ascii=False)}")
+
+    (dst / "train_list_sha256.txt").write_text("\n".join(lines) + "\n", encoding="utf-8", newline="\n")
+    print(f"[gtsha256] {len(lines)} images -> {dst / 'train_list_sha256.txt'} (skipped {skipped})")
     return dst
 
 
@@ -175,9 +216,10 @@ def main():
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--langs", default="ar,fa,ps")
     ap.add_argument("--out", default=str(ROOT / "outputs"))
-    ap.add_argument("--dpr", type=float, default=2.0)
-    ap.add_argument("--width", type=int, default=794)
-    ap.add_argument("--height", type=int, default=1123)
+    ap.add_argument("--dpr", type=float, default=1.0, help="截图超采样倍率（默认 1.0）")
+    ap.add_argument("--res", default="640x800", help="输出页分辨率 WxH，如 640x800 / 736x736 / 794x1123")
+    ap.add_argument("--width", type=int, default=0, help="覆盖 --res 的宽（兼容旧用法）")
+    ap.add_argument("--height", type=int, default=0, help="覆盖 --res 的高（兼容旧用法）")
     ap.add_argument("--illust-prob", type=float, default=0.05)
     ap.add_argument("--stage", choices=["all", "pages", "render", "degrade"], default="all")
     ap.add_argument("--chrome", default=None)
@@ -187,12 +229,24 @@ def main():
         action="store_true",
         help="输出 PaddleOCR det 格式：outputs/images/*.jpg + outputs/train_list.txt",
     )
+    ap.add_argument(
+        "--gtsha256",
+        action="store_true",
+        help="在 final/ 下额外生成 sha256 内容寻址清单 final/train_list_sha256.txt",
+    )
     args = ap.parse_args()
 
     langs = [x.strip() for x in args.langs.split(",") if x.strip()]
     for lang in langs:
         if lang not in ("ar", "fa", "ps"):
             ap.error(f"unsupported lang {lang}")
+
+    res = args.res.lower().replace("*", "x").split("x")
+    if len(res) != 2 or not all(x.strip().isdigit() for x in res):
+        ap.error("--res 需形如 640x800")
+    args.width = args.width or int(res[0])
+    args.height = args.height or int(res[1])
+    args.scale = args.width / 794.0  # 版式按 794px 宽设计
 
     t0 = time.time()
     o = Path(args.out)
@@ -218,6 +272,8 @@ def main():
         stage_render(args)
     if args.stage in ("all", "degrade"):
         stage_degrade(args, pages)
+        if args.gtsha256:
+            stage_gtsha256(args, pages)
         if args.paddle:
             stage_paddle(args, pages)
 
@@ -228,7 +284,7 @@ def main():
         "dpr": args.dpr,
         "page_size": [args.width, args.height],
         "illust_prob": args.illust_prob,
-        "format": "paddle" if args.paddle else "native",
+        "format": ("paddle" + ("+gtsha256" if args.gtsha256 else "")) if args.paddle else ("gtsha256" if args.gtsha256 else "native"),
         "profile_weights": degrade.PROFILE_WEIGHTS,
         "elapsed_sec": round(time.time() - t0, 1),
     }

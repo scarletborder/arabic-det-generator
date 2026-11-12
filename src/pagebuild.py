@@ -40,16 +40,19 @@ def build_spec(
     height: int = 1123,
     illus_prob: float = 0.05,
     page_no: int = 1,
+    scale: float = 1.0,
 ) -> dict:
     body_face = fontpool.pick_body(rng, faces)
     title_face = fontpool.pick_title(rng, faces, body_face)
     met = fontpool.metrics(body_face, rng)
+    # scale: 版式按 794px 宽设计，输出 640px 宽时等比缩小（字号/边距同步缩放）
+    met = {"size": round(met["size"] * scale, 2), "line_height": met["line_height"]}
 
     margin = {
-        "top": rng.randint(34, 68),
-        "bottom": rng.randint(46, 84),
-        "left": rng.randint(42, 78),
-        "right": rng.randint(42, 78),
+        "top": int(rng.randint(34, 68) * scale),
+        "bottom": int(rng.randint(46, 84) * scale),
+        "left": int(rng.randint(42, 78) * scale),
+        "right": int(rng.randint(42, 78) * scale),
     }
     two_col = rng.random() < 0.15
     columns = 2 if two_col else 1

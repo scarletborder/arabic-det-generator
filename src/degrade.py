@@ -347,6 +347,12 @@ def degrade_page(
         quality = rng.randint(55, 80)
     else:
         quality = rng.randint(86, 96)
+    # JPEG 4:2:0 会把锐利的墨迹边缘渲染成红/青色描边，先柔化色度通道再编码
+    ycc = cv2.cvtColor(np.clip(img, 0, 255).astype(np.uint8), cv2.COLOR_BGR2YCrCb)
+    ycc[:, :, 1] = cv2.blur(ycc[:, :, 1], (3, 3))
+    ycc[:, :, 2] = cv2.blur(ycc[:, :, 2], (3, 3))
+    img = cv2.cvtColor(ycc, cv2.COLOR_YCrCb2BGR)
+
     ok, buf = cv2.imencode(".jpg", np.clip(img, 0, 255).astype(np.uint8), [int(cv2.IMWRITE_JPEG_QUALITY), quality])
     if not ok:
         raise RuntimeError("jpeg encode failed")
